@@ -12,6 +12,8 @@ LS.Globals.FT = this;
 this.pit = [];
 
 this.faceModel = "customRomeo";
+//this.faceModels = ["customRomeo", "autodeskCharGen"];
+
 this.lipsyncModel = "threeLS";
 
 this.showGUI = true;
@@ -32,11 +34,13 @@ this.onStart = function()
   this.bswPIT = {};
   // Get morph targets
   // TODO: get bones, get multiple meshes with morph targets
+  this.maxMorphPerNode = 0; //GUI
   var morphTargets = this.findMorphTargets();
-  if (morphTargets){
+  if (morphTargets.length != 0){
     this.morphTargets = morphTargets;
-    this.mtN = this.morphTargets.length;
-  }
+   	this.mtN = this.morphTargets.length;
+  } else
+    console.warn("Morph targets not found in children");
   
   // IDEA, if bone selected, show possiblitity to add slider. the value will go to facial control
   if (LS.Globals.Facial)
@@ -61,7 +65,7 @@ this.onStart = function()
     if (typeof ThreeLS !== "undefined")
       this.LS = new ThreeLS();
   } else if (this.lipsyncModel == "LipSyncJP"){
-    if (typeof LipSyncJP !== "undefined"){
+   	if (typeof LipSyncJP !== "undefined"){
       // jawOpen: {nameBS: weight, nameBS2, weight}, mouthX: {nameBS3: weight}...
       this.LS = new LipSyncJP();
       // TODO: modify script of lipsyncing to have BSW instead of visemes
@@ -74,7 +78,7 @@ this.onStart = function()
 
 this.onUpdate = function(dt)
 {
-  node.scene.refresh();
+	node.scene.refresh();
 }
 
 
@@ -88,26 +92,28 @@ this.onUpdate = function(dt)
 // Multiple meshes with morph targets
 this.findMorphTargets = function(){
   // Find morph targets
-  var morphTargets = false;
+  var morphTargetsAgent = [];
   if (node.childNodes) {
-    for (var i = 0; i<node.childNodes.length; i++){
-      // Suppose that the object with morph targets is a child
+  	for (var i = 0; i<node.childNodes.length; i++){
+    	// Suppose that the object with morph targets is a child
       var morphComp = node.childNodes[i].getComponent(LS.Components.MorphDeformer)
       if (morphComp !== null){
-        morphTargets = morphComp.morph_targets;
+        var morphTargetsNode = morphComp.morph_targets;
+        // Check maximum per node for GUI representation
+        if (this.maxMorphPerNode<morphTargetsNode.length) this.maxMorphPerNode = morphTargetsNode.length;
         // Find names
-        this.findMorphNames(morphTargets);
-        
-        break;
+        this.findMorphNames(morphTargetsNode, node.childNodes[i].name);
+        // Add to morph targets array
+        morphTargetsAgent = morphTargetsAgent.concat(morphTargetsNode);
       }
-    }
+  	}
   }
   
-  return morphTargets;
+  return morphTargetsAgent;
 }
 
 // Find common start string of all morph targets
-this.findMorphNames = function(morphTargets){
+this.findMorphNames = function(morphTargets, nodeName){
   if (morphTargets.length > 1){
     var stringSize = morphTargets[0].mesh.length;
     for (var i = 1; i<morphTargets.length; i++){
@@ -117,13 +123,14 @@ this.findMorphNames = function(morphTargets){
       while(n1.substr(0,stringSize) != n2.substr(0,stringSize)){
         stringSize-= 1;
         if (stringSize <= 0){
-          break;
+        	break;
         }
       }
     }
     // Now we have the common string to all morph targets. Name them.
     for (var i = 0; i<morphTargets.length; i++){
       morphTargets[i].name = morphTargets[i].mesh.substr(stringSize, morphTargets[i].mesh.length);
+      morphTargets[i].node = nodeName;
     }
     
   } else if (morphTargets.length == 1) 
@@ -139,6 +146,9 @@ this.findMorphNames = function(morphTargets){
 
 // Valence Arousal to blend shape weights
 this.VA2BSW = function(valAro, pit){
+  
+  if (pit.length == 0)
+    return [];
 
   limDist = 0.8;
   var BSW = this.bswPIT; // Memory saving
@@ -191,7 +201,7 @@ this.VA2BSW = function(valAro, pit){
   // Prioritaze closest expression
   if (cumWeight > 1){
     for (var ii = 0; ii < pit.length; ii++){
-      weightV[ii] = Math.pow(weightV[ii], cumWeight);
+			weightV[ii] = Math.pow(weightV[ii], cumWeight);
       cumWeightBal = weightV[ii];
     }
   }
@@ -201,10 +211,10 @@ this.VA2BSW = function(valAro, pit){
     var pitValAro = pit[ii];
 
     for (var i = 0; i < keysBS.length; i++){
-      if (keysBS[i] == "val" || keysBS[i] == "aro") continue;   
+			if (keysBS[i] == "val" || keysBS[i] == "aro") continue;   
       var bsName = keysBS[i];
-      if (cumWeightBal>1)
-        BSW[bsName] += pitValAro[bsName] * weightV[ii]/cumWeightBal;//this._pit[ii*bNumber +i+2] * weightV[ii]/cumWeightBal;
+     	if (cumWeightBal>1)
+    		BSW[bsName] += pitValAro[bsName] * weightV[ii]/cumWeightBal;//this._pit[ii*bNumber +i+2] * weightV[ii]/cumWeightBal;
       else
         BSW[bsName] += pitValAro[bsName] * weightV[ii];//this._pit[ii*bNumber +i+2] * weightV[ii];
     }
@@ -221,17 +231,17 @@ this.VA2BSW = function(valAro, pit){
 // Default pits
 this.defineDefaultPit = function(modelName){
   var pit = [];
-  // TODO: ADAPT to sara.dae
-  if (modelName == "sara.dae"){
-
-    //return [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.0977948675757803,0.9952065935652937,1.1933333333333334,0,0.78,0,0.8733333333333333,0,0.36666666666666664,0,0,0,0.16,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-0.13333333333333333,0,0,0.7488937172321077,-0.6626901238816493,-0.29333333333333333,0,0.03348783257000651,0,0.0010934239655897514,0.002186847931179503,0.018040118727995783,0,0,0,0.0000031146556245799503,0,0.07033419956209752,0,0,0,0,0,0,0,0,0.03722104161741757,0.9066666666666666,0.002021177633362874,0,0,0,0,0.19333333333333333,0,0,-0.7066666666666667,0.6933333333333334,-0.14,0,1.2666666666666666,0,0.20666666666666667,0,0.44,0,0,0,0,0,0.6,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-0.12,0,0,-0.98,0,0,0.6466666666666666,0.5666666666666667,0.4533333333333333,0.011311579059591466,0,0.024082716707517316,0,0,0.54,0.16,-0.04,-0.09333333333333334,0,0,0,0,0,0,-0.02666666666666667,0,0,0,0,0,0,0.5133333333333333,0.5733333333333334,0.12,0,0,-0.6757246285173463,-0.7371541402007414,0.6333333333333333,0,0,0.64,0,0,0,0,0,0,0,0,1.2333333333333334,0.4666666666666667,0,0,0,0,0,0,0,0,0,0,0,0,0.28,0,0,0.41333333333333333,0.38666666666666666,0.019476824194835866,-0.9998103086682412,-0.08,0,0.19333333333333333,0.31333333333333335,0.07333333333333333,-0.09333333333333334,0,0,0,0,0.16,0,0.0876215344175895,0.033154094103952786,0,0,0,0,0,0,0,0,0,0,0,0,0.62,0,0.19333333333333333,0.3466666666666667,0.34,0.9999861498722319,0.005263084999327537,0.17333333333333334,0,0.41333333333333333,0,0.00011810519549431978,0.00023621039098863957,0.0019485870222000297,0,0,0,3.3642669542192594e-7,0,0.18666666666666668,0,0,0,0,0,0,0,0,0.00402039696866922,0.8866666666666667,0,0,0,0,0,0.020882724219956354,0,0,0.766647966540689,0.6420676719778271,0.26666666666666666,0,0.26666666666666666,0,0.4266666666666667,0.35333333333333333,0.020300998360153276,0,0,0,0.008729220694527952,0,0.028418013918050534,0,0,0,0,0,0,0,0,0.0006120626625628397,0.25333333333333335,0,0.98,0,0,0,-0.004095135321568162,0,0]
+  // TODO: create models
+  if (modelName == "autodeskCharGen" && typeof PITforAutodeskCharGen != "undefined"){
+		pit = new PITforAutodeskCharGen();
   } 
   // Default pit
-  else if (modelName == "customRomeo"){
+  else if (modelName == "customRomeo" && pitForRomeoModel){
     var blendNames = {smile:"smile", sad:"sad", kiss:"kiss", lipsClosed:"lipsClosed", jaw:"jaw", 
                       browsUp:"eyebrowUp", browsDown:"eyebrowDown", browsInnerUp:"eyebrowInnerUp", eyeLids:"eyelids"};
-     pit = JSON.parse('[{"val":0,"aro":0,"smile":0,"sad":0,"kiss":0,"lipsClosed":0,"jaw":0,"browsUp":0,"browsDown":0,"browsInnerUp":0,"eyeLids":0},{"val":0,"aro":1,"smile":0,"sad":0,"kiss":0.344,"lipsClosed":0.344,"jaw":0.7,"browsUp":1,"browsDown":0,"browsInnerUp":0,"eyeLids":-0.3},{"val":0.5,"aro":0.866,"smile":1,"sad":0,"kiss":0,"lipsClosed":0,"jaw":0.6,"browsUp":0,"browsDown":0.346,"browsInnerUp":0.732,"eyeLids":0},{"val":0.866,"aro":0.5,"smile":0.7,"sad":0,"kiss":0,"lipsClosed":0,"jaw":0,"browsUp":0.763,"browsDown":0.53,"browsInnerUp":0,"eyeLids":0},{"val":0.9999797158186168,"aro":-0.006369297552984821,"smile":0.62,"sad":0,"kiss":0.38666666666666666,"lipsClosed":0,"jaw":0,"browsUp":0.116,"browsDown":0,"browsInnerUp":0.2,"eyeLids":0.1},{"val":0.707,"aro":-0.707,"smile":0,"sad":0,"kiss":0.675,"lipsClosed":0,"jaw":0.3,"browsUp":0.216,"browsDown":0.38,"browsInnerUp":0.2,"eyeLids":0.3},{"val":0.006134853874888963,"aro":-0.999981181606901,"smile":0,"sad":0.07333333333333333,"kiss":0,"lipsClosed":0.6933333333333334,"jaw":0,"browsUp":-0.3466666666666667,"browsDown":0,"browsInnerUp":0.25333333333333335,"eyeLids":0.5},{"val":-0.707,"aro":-0.707,"smile":0,"sad":1,"kiss":0,"lipsClosed":0,"jaw":0.5,"browsUp":0,"browsDown":1,"browsInnerUp":0,"eyeLids":0.6},{"val":-1,"aro":0,"smile":0,"sad":0.86,"kiss":0.09333333333333334,"lipsClosed":0.441,"jaw":0,"browsUp":-0.29333333333333333,"browsDown":0,"browsInnerUp":0.9,"eyeLids":0.3466666666666667},{"val":-0.866,"aro":0.5,"smile":0.527,"sad":0.92,"kiss":0.757,"lipsClosed":0,"jaw":0.25,"browsUp":0.366,"browsDown":0.989,"browsInnerUp":0,"eyeLids":-0.6},{"val":-0.5,"aro":0.866,"smile":0.57,"sad":0.391,"kiss":0.462,"lipsClosed":0.591,"jaw":1,"browsUp":0,"browsDown":0,"browsInnerUp":0.981,"eyeLids":0}]');    
-    // Find correspondance with morph target names
+    
+    pit = new PITforRomeoModel();
+  	// Find correspondance with morph target names
     this.redefineBlendNames(blendNames);
     //console.log("237line",blendNames);
     // Rename blend shapes in pit
@@ -241,24 +251,24 @@ this.defineDefaultPit = function(modelName){
     
   } else {
     /* From Marco Romeo's thesis 
-      blend shapes:
+    	blend shapes:
       0 - mouth sad; 1 - mouth happy; 2 - lips closed and pressed (kiss-alike); 3 - kiss; 4 - jaw; 
       5 - eyebrows down; 6 - eyebrows rotate outwards; 7 - eyebrows up; 8 - eyelids closed
     */
     var blendNames = {smile:"smile", sad:"sad", kiss:"kiss", lipsClosed:"lipsClosed", jaw:"jaw", 
                       browsUp:"browsUp", browsDown:"browsDown", browsInnerUp:"browsInnerUp", eyeLids:"eyeLids"};
     
-    pit.push({val:0,      aro:0,      smile: 0, sad: 0, kiss: 0, lipsClosed: 0, jaw:0, browsUp: 0, browsDown: 0, browsInnerUp: 0, eyeLids: 0});
-    pit.push({val:0,      aro:1,      smile: 0, sad: 0, kiss: 0.344, lipsClosed: 0.344, jaw:0.7, browsUp:1, browsDown:0, browsInnerUp:0, eyeLids: -0.3});
-    pit.push({val:0.5,    aro:0.866,  smile: 1, sad: 0, kiss: 0, lipsClosed: 0, jaw:0.6, browsUp:0, browsDown:0.346, browsInnerUp:0.732, eyeLids: 0});
-    pit.push({val:0.866,  aro:0.5,    smile: 0.7, sad: 0, kiss: 0, lipsClosed: 0, jaw:0, browsUp:0.763, browsDown:0.53, browsInnerUp:0, eyeLids: 0});
-    pit.push({val:1,      aro:0,      smile: 1, sad: 0, kiss: 0.675, lipsClosed: 0, jaw:0, browsUp:0.116, browsDown:0, browsInnerUp:0.2, eyeLids: 0.1});
-    pit.push({val:0.707,  aro:-0.707, smile: 0, sad: 0, kiss: 0.675, lipsClosed: 0, jaw:0.3, browsUp:0.216, browsDown:0.38, browsInnerUp:0.2, eyeLids: 0.3});
-    pit.push({val:0,      aro:-1,     smile: 0, sad: 0.5, kiss: 0, lipsClosed: 0.225, jaw:0, browsUp:0.9, browsDown:0.9, browsInnerUp:0, eyeLids: 0.5});
+    pit.push({val:0, 			aro:0, 			smile: 0, sad: 0, kiss: 0, lipsClosed: 0, jaw:0, browsUp: 0, browsDown: 0, browsInnerUp: 0, eyeLids: 0});
+    pit.push({val:0, 			aro:1, 			smile: 0, sad: 0, kiss: 0.344, lipsClosed: 0.344, jaw:0.7, browsUp:1, browsDown:0, browsInnerUp:0, eyeLids: -0.3});
+    pit.push({val:0.5, 		aro:0.866,	smile: 1, sad: 0, kiss: 0, lipsClosed: 0, jaw:0.6, browsUp:0, browsDown:0.346, browsInnerUp:0.732, eyeLids: 0});
+    pit.push({val:0.866, 	aro:0.5, 		smile: 0.7, sad: 0, kiss: 0, lipsClosed: 0, jaw:0, browsUp:0.763, browsDown:0.53, browsInnerUp:0, eyeLids: 0});
+    pit.push({val:1, 			aro:0, 			smile: 1, sad: 0, kiss: 0.675, lipsClosed: 0, jaw:0, browsUp:0.116, browsDown:0, browsInnerUp:0.2, eyeLids: 0.1});
+    pit.push({val:0.707, 	aro:-0.707, smile: 0, sad: 0, kiss: 0.675, lipsClosed: 0, jaw:0.3, browsUp:0.216, browsDown:0.38, browsInnerUp:0.2, eyeLids: 0.3});
+    pit.push({val:0, 			aro:-1, 		smile: 0, sad: 0.5, kiss: 0, lipsClosed: 0.225, jaw:0, browsUp:0.9, browsDown:0.9, browsInnerUp:0, eyeLids: 0.5});
     pit.push({val:-0.707, aro:-0.707, smile: 0, sad: 1, kiss: 0, lipsClosed: 0, jaw:0.5, browsUp:0, browsDown:1, browsInnerUp:0, eyeLids: 0.6});
-    pit.push({val:-1,     aro:0,      smile: 0, sad: 0.527, kiss: 0.531, lipsClosed: 0.441, jaw:0, browsUp:0, browsDown:0, browsInnerUp:1, eyeLids: 0.6});
-    pit.push({val:-0.866, aro:0.5,    smile: 0.527, sad: 0.920, kiss: 0.757, lipsClosed: 0, jaw:0.25, browsUp:0.366, browsDown:0.989, browsInnerUp:0, eyeLids: -0.6});
-    pit.push({val:-0.5,   aro:0.866,  smile: 0.57, sad: 0.391, kiss: 0.462, lipsClosed: 0.591, jaw:1.0, browsUp:0, browsDown:0, browsInnerUp:0.981, eyeLids: 0}); 
+    pit.push({val:-1, 		aro:0,			smile: 0, sad: 0.527, kiss: 0.531, lipsClosed: 0.441, jaw:0, browsUp:0, browsDown:0, browsInnerUp:1, eyeLids: 0.6});
+    pit.push({val:-0.866, aro:0.5,		smile: 0.527, sad: 0.920, kiss: 0.757, lipsClosed: 0, jaw:0.25, browsUp:0.366, browsDown:0.989, browsInnerUp:0, eyeLids: -0.6});
+    pit.push({val:-0.5, 	aro:0.866, 	smile: 0.57, sad: 0.391, kiss: 0.462, lipsClosed: 0.591, jaw:1.0, browsUp:0, browsDown:0, browsInnerUp:0.981, eyeLids: 0}); 
   
     // Find correspondance with morph target names
     this.redefineBlendNames(blendNames);
@@ -331,7 +341,7 @@ this.findSimilar = function(targets){
         return bsName;
       // Includes
       else if (bsName.toLowerCase().includes(bsTarg.toLowerCase()))
-        return bsName;
+      	return bsName;
     }
   }
   console.warn("FacialTools; findSimilar; Blend shape correspondance not found for", targets);
@@ -341,7 +351,7 @@ this.findSimilar = function(targets){
 
 // Rename the blend shapes of the pit with the ones in the scene
 this.redefinePit = function(pit, blendNames){
-  var keysPit = Object.keys(pit[0]);
+	var keysPit = Object.keys(pit[0]);
   var keysBN = Object.keys(blendNames);
   // Discussion: if some expressions only use some blendshapes this should be ommited.
   // Length should be the same minus val and aro
@@ -391,10 +401,10 @@ this.onRenderGUI = function(){
   gl.start2D();
   
   if (!gl.mouse.left_button){
-    this._clicked = false;
+		this._clicked = false;
     this._clickedId = -1;
     if (!gl.mouse.right_button)
-      this._selExpr = null;
+    	this._selExpr = null;
   }
   
   
@@ -430,7 +440,7 @@ this.onRenderGUI = function(){
     if (gl.mouse.middle_button){}
   }
   else
-    gl.fillStyle = "rgba(255,0,0,0.5)";
+  	gl.fillStyle = "rgba(255,0,0,0.5)";
   
   
   
@@ -442,7 +452,7 @@ this.onRenderGUI = function(){
     var mag = Math.sqrt(this.val*this.val + this.aro*this.aro);
     if (mag>1){
       this.val/= mag;
-      this.aro/= mag;
+    	this.aro/= mag;
     } 
     // Dragging selected expression
     if (this._selExpr !== null || this._levelEdit.includes("editExpr")){
@@ -452,7 +462,7 @@ this.onRenderGUI = function(){
 
       this._levelEdit = "editExpr_" + numExpr;
       this._candidate = null;
-      // Assign and modify face
+			// Assign and modify face
       for (var i = 0; i <this.morphTargets.length; i++){
         var bsName = this.morphTargets[i].name;
         if (this.pit[numExpr][bsName] !== undefined )
@@ -463,10 +473,9 @@ this.onRenderGUI = function(){
     if (this._candidate){
       this._candidate.val = this.val;
       this._candidate.aro = this.aro;
-
+      
       var bsw = this.VA2BSW([this.val, this.aro], this.pit);
       
-
       // Assign and modify face
       for (var i = 0; i <this.morphTargets.length; i++){
         var bsName = this.morphTargets[i].name;
@@ -480,9 +489,9 @@ this.onRenderGUI = function(){
   gl.lineWidth = 2;
   
   gl.beginPath();
-  gl.arc(width-wwX,wwY,wwR,0,2*Math.PI);
+	gl.arc(width-wwX,wwY,wwR,0,2*Math.PI);
   gl.fill();
-  gl.stroke();
+	gl.stroke();
   
   // Candidate
   if (this._clicked && this._clickedId == "ww" || this._candidate){
@@ -525,7 +534,7 @@ this.onRenderGUI = function(){
               for (var j = 0; j<keysBS.length; j++){
                 if (mt.name == keysBS[j]){
                   this._candidate[mt.name] = mt.weight;
-                  delete keysBS[j]; // Optimize loop
+                	delete keysBS[j]; // Optimize loop
                 }
               }
               // Should include too all blendshapes with weight!=0?
@@ -535,8 +544,8 @@ this.onRenderGUI = function(){
           else {
             for (var i = 0; i<this.morphTargets.length; i++){
               var mt = this.morphTargets[i];
-              if (mt.weight != 0)
-                this._candidate[mt.name] = mt.weight;
+              //if (mt.weight != 0)
+              	this._candidate[mt.name] = mt.weight;
             }
           }
           this.pit.push(this._candidate);
@@ -574,7 +583,7 @@ this.onRenderGUI = function(){
     
     }
   } else
-    gl.fillStyle = "rgba(255,255,255,0.3)";
+		gl.fillStyle = "rgba(255,255,255,0.3)";
   
   // Paint button
   gl.fillRect(rect.x,rect.y,rect.w,rect.h);
@@ -583,7 +592,7 @@ this.onRenderGUI = function(){
   if (this._candidate)
     gl.fillText("Store candidate", rect.x + rect.w/2, rect.y +3*rect.h/4);
   else if (this._levelEdit.includes("editExpr"))
-    gl.fillText("Store edit", rect.x + rect.w/2, rect.y +3*rect.h/4);
+  	gl.fillText("Store edit", rect.x + rect.w/2, rect.y +3*rect.h/4);
   else
     gl.fillText("Reset pit", rect.x + rect.w/2, rect.y +3*rect.h/4);
   
@@ -608,11 +617,11 @@ this.onRenderGUI = function(){
       var dist = Math.sqrt((mouseVal - val)*(mouseVal - val) + (mouseAro - aro)*(mouseAro - aro));
       
       gl.strokeStyle = "rgba(255,255,255,0.4)";
-      gl.lineWidth = 2;
+  		gl.lineWidth = 2;
       // Mouse over facial expression
       
       if (dist < minDist && !this._candidate && !this._levelEdit.includes("editExpr")) {
-        gl.fillStyle = "rgba(0,255,0,0.8)";
+      	gl.fillStyle = "rgba(0,255,0,0.8)";
         this._selExpr = i;
       } 
       // Level edit: "editExpr(#selExpr)"
@@ -623,7 +632,7 @@ this.onRenderGUI = function(){
           gl.fillStyle = "rgba(0,255,0,"+alpha+")";
         } else gl.fillStyle = "rgba(0,255,0,0.1)";
       } else {
-        gl.fillStyle = "rgba(0,255,0,0.4)";
+      	gl.fillStyle = "rgba(0,255,0,0.4)";
       }
       gl.beginPath();
       gl.arc(width-wwX + val*wwR,wwY - aro*wwR,wwR*0.04,0,2*Math.PI);
@@ -654,7 +663,7 @@ this.onRenderGUI = function(){
     
     // Title
     gl.font = "15px Arial";
-    gl.textAlign = "center";
+  	gl.textAlign = "center";
     gl.fillStyle = "rgba(255,255,255,0.9)";
     gl.fillText("Lipsync visemes", wPos + wSq/2, startH - 20);
     // Visemes
@@ -664,9 +673,9 @@ this.onRenderGUI = function(){
       
       // Interaction
       if (gl.mouse.x < rect.x + rect.w && gl.mouse.x > rect.x &&
-        h-gl.mouse.y < rect.y + rect.h && h-gl.mouse.y > rect.y &&
+      	h-gl.mouse.y < rect.y + rect.h && h-gl.mouse.y > rect.y &&
          !this._clicked){
-        gl.fillStyle = "rgba(255,255,255,0.5)";
+    		gl.fillStyle = "rgba(255,255,255,0.5)";
         
         // Clicked inside
         if (gl.mouse.left_button && !this._clicked){
@@ -688,7 +697,7 @@ this.onRenderGUI = function(){
         var mt = this.morphTargets;
         for (var j = 0; j<mt.length; j++){
           for (var k = 0; k<visKeys.length; k++){
-            if (mt[j].name == visKeys[k])
+						if (mt[j].name == visKeys[k])
               mt[j].weight = visemeBSW[visKeys[k]];
           }
         }
@@ -698,16 +707,16 @@ this.onRenderGUI = function(){
         if(Object.keys(this.visemeCand)[0] == lsKeys[i])
           gl.fillStyle = "rgba(0,255,0,0.3)";
         else
-          gl.fillStyle = "rgba(255,255,255,0.3)";
+      		gl.fillStyle = "rgba(255,255,255,0.3)";
       } else
-        gl.fillStyle = "rgba(255,255,255,0.3)";
+      	gl.fillStyle = "rgba(255,255,255,0.3)";
       
       // Paint rectangle
       gl.fillRect(rect.x,rect.y,rect.w,rect.h);
       
       // Paint text
-      gl.fillStyle = "rgba(255,255,255,0.9)";
-      gl.fillText(lsKeys[i], rect.x + rect.w/2, rect.y +3*rect.h/4);
+  		gl.fillStyle = "rgba(255,255,255,0.9)";
+ 	 		gl.fillText(lsKeys[i], rect.x + rect.w/2, rect.y +3*rect.h/4);
     }
     
     // STORE VISEME
@@ -718,9 +727,9 @@ this.onRenderGUI = function(){
       
       // Interaction
       if (gl.mouse.x < rect.x + rect.w && gl.mouse.x > rect.x &&
-        h-gl.mouse.y < rect.y + rect.h && h-gl.mouse.y > rect.y &&
+      	h-gl.mouse.y < rect.y + rect.h && h-gl.mouse.y > rect.y &&
          !this._clicked){
-        gl.fillStyle = "rgba(255,255,255,0.5)";
+    		gl.fillStyle = "rgba(255,255,255,0.5)";
         
         // Clicked inside
         if (gl.mouse.left_button && !this._clicked){
@@ -739,7 +748,7 @@ this.onRenderGUI = function(){
       } else{
         var sinVariation = Math.sin(2*Math.PI*getTime()/1000);
         var color = sinVariation*100 + 155;
-        gl.fillStyle = "rgba(0,"+color+",0,0.5)";
+      	gl.fillStyle = "rgba(0,"+color+",0,0.5)";
       }
       
       
@@ -748,8 +757,8 @@ this.onRenderGUI = function(){
       // Paint text
       gl.font = "15px Arial";
       gl.textAlign = "center";
-      gl.fillStyle = "rgba(255,255,255,0.9)";
-      gl.fillText("Store viseme", rect.x + rect.w*0.95/2, rect.y +3*rect.h/4);
+  		gl.fillStyle = "rgba(255,255,255,0.9)";
+ 	 		gl.fillText("Store viseme", rect.x + rect.w*0.95/2, rect.y +3*rect.h/4);
     }
   }
   
@@ -765,20 +774,30 @@ this.onRenderGUI = function(){
   // Morph Targets
   if (this.morphTargets){
     gl.font = "10px Arial";
-    gl.textAlign = "center";
+  	gl.textAlign = "center";
     var mt = this.morphTargets;
     
-    var hSq = Math.min(30, h*0.7/mt.length);
+    var hSq = Math.min(30, h*0.7/this.maxMorphPerNode);//mt.length);
     var startWminus = 300;
-    
+    var node = "";
+    var prevNode = "";
+    var nodeCount = 0;
+    var nodeIndex = 0;
     for (var i = 0; i<mt.length; i++){
-      rect={x:w-startWminus,y:0.07*h + i*hSq*1.25,w:150,h:hSq*0.75};
+      // If multiple nodes have blend shapes
+      node = mt[i].node;
+      if (prevNode == "") prevNode = node; // Init
+      if (node != prevNode){ nodeCount++; nodeIndex = i;}
+      
+      rect={x:w-startWminus - nodeCount*150*1.5,
+            y:0.07*h + (i-nodeIndex)*hSq*1.25,
+            w:150,h:hSq*0.75};
       
       // Interaction
       if (gl.mouse.x < rect.x + rect.w && gl.mouse.x > rect.x &&
-        h-gl.mouse.y < rect.y + rect.h && h-gl.mouse.y > rect.y &&
+      	h-gl.mouse.y < rect.y + rect.h && h-gl.mouse.y > rect.y &&
          !this._clicked){
-        gl.fillStyle = "rgba(255,255,255,0.5)";
+    		gl.fillStyle = "rgba(255,255,255,0.5)";
         
         // Clicked inside
         if (gl.mouse.left_button && !this._clicked){
@@ -793,13 +812,13 @@ this.onRenderGUI = function(){
       else if (this._clicked && this._clickedId == i){
         gl.fillStyle = "rgba(255,255,255,0.5)";
       } else
-        gl.fillStyle = "rgba(255,255,255,0.3)";
+      	gl.fillStyle = "rgba(255,255,255,0.3)";
       // Paint rectangle
       
-      gl.fillRect(rect.x,rect.y,rect.w,rect.h);
+  		gl.fillRect(rect.x,rect.y,rect.w,rect.h);
       // Paint text
-      gl.fillStyle = "rgba(255,255,255,0.9)";
-      gl.fillText(mt[i].name + ", " + mt[i].weight.toFixed(2), rect.x + rect.w/2, rect.y +3*rect.h/4);
+  		gl.fillStyle = "rgba(255,255,255,0.9)";
+ 	 		gl.fillText(mt[i].name + ", " + mt[i].weight.toFixed(2), rect.x + rect.w/2, rect.y +3*rect.h/4);
       // Paint slider
       gl.beginPath();
       gl.moveTo(rect.x + mt[i].weight*rect.w, rect.y);
@@ -811,22 +830,40 @@ this.onRenderGUI = function(){
       if (this._clicked && gl.mouse.dragging && this._clickedId == i){
         mt[i].weight = (gl.mouse.x - rect.x)/(rect.w);
       }
+      // Prev node name for multiple meshes with morph targets
+      prevNode = node;
     }
     // Reset button
-    rect={x:w-startWminus,y:0.07*h + mt.length*hSq*1.25,w:150,h:hSq*0.75};
+    //rect={x:w-startWminus,y:0.07*h + mt.length*hSq*1.25,w:150,h:hSq*0.75};
+    rect={x:w-startWminus,y:0.07*h + this.maxMorphPerNode*hSq*1.25,w:150,h:hSq*0.75};
     gl.fillStyle = "rgba(255,255,255,0.9)";
-    gl.fillText("RESET", rect.x + rect.w/2, rect.y +3*rect.h/4);
+ 	  gl.fillText("RESET", rect.x + rect.w/2, rect.y +3*rect.h/4);
     gl.fillStyle = "rgba(255,255,255,0.3)";      
-    gl.fillRect(rect.x,rect.y,rect.w,rect.h);
+  	gl.fillRect(rect.x,rect.y,rect.w,rect.h);
     // Reset weights
     if (gl.mouse.x < rect.x + rect.w && gl.mouse.x > rect.x &&
         h-gl.mouse.y < rect.y + rect.h && h-gl.mouse.y > rect.y && gl.mouse.left_button){
-      for (var i = 0; i<mt.length; i++){
-        mt[i].weight = 0;
-      }
-    }
+			for (var i = 0; i<mt.length; i++){
+      	mt[i].weight = 0;
+    	}
+  	}
       
   }
   
   gl.finish2D();
 }
+
+
+
+
+PITforAutodeskCharGen = function(){
+	return JSON.parse('[{"val":0.006666666666666667,"aro":0.013333333333333334,"t_FV_m0":0,"t_UH_OO_m0":0,"t_AE_AA_m0":0,"t_JawCompress_m0":0,"CurlUp_Out_tg_m0":0,"t_S_m0":0,"Right_In_tg_m0":0,"t_Ljaw_m0":0,"CurlDown_Out_tg_m0":0,"t_UW_U_m0":0,"RRR_In_tg_m0":0,"t_Ax_E_m0":0,"t_MPB_m0":0,"Left_In_tg_m0":0,"LLL_In_tg_m0":0,"Up_tg_m0":0,"t_Shout_m0":0,"t_Chew_m0":0,"t_JawFront_m0":0,"t_AO_a_m0":0,"Throat_In_tg_m0":0,"t_KG_m0":0,"t_SH_CH_m0":0,"t_H_EST_m0":0,"Compress_tg_m0":0,"CurlLeft_Out_tg_m0":0,"CurlRight_Out_tg_m0":0,"OutMiddle_tg_m0":0,"t_MouthOpen_m0":0,"t_TD_I_m0":0,"t_Rjaw_m0":0,"LlipSide_m0":0,"LLbrowDown_m0":0,"TD_I_m0":0,"RneckTension_m0":0,"RsmileClose_m0":0,"LsmileOpen_m0":0,"LbrowUp_m0":0,"LneckTension_m0":0,"RRbrowDown_m0":0,"Rnostril_m0":0,"JawCompress_m0":0,"RlipCorner_m0":0,"RbrowDown_m0":0,"Lnostril_m0":0,"LlipDown_m0":0,"S_m0":0,"ReyeOpen_m0":0,"ReyeClose_m0":0,"LeyeClose_m0":0,"MPB_Down_m0":0,"LlipCorner_m0":0,"H_EST_m0":0,"Ljaw_m0":0,"Chew_m0":0,"Shout_m0":0,"LeyeOpen_m0":0,"MouthOpen_m0":0,"RlipDown_m0":0,"FV_m0":0,"KG_m0":0,"Lsquint_m0":0,"RmouthSad_m0":0,"Kiss_m0":0,"RlowLid_m0":0,"LmouthSad_m0":0,"JawFront_m0":0,"RlipSide_m0":0,"AE_AA_m0":0,"LlowLid_m0":0,"RlipUp_m0":0,"UH_OO_m0":0,"Rsad_m0":0,"LsmileClose_m0":0,"Ldisgust_m0":0,"SH_CH_m0":0,"UW_U_m0":0,"Chin_m0":0,"AO_a_m0":0,"Rpityful_m0":0,"LlipUp_m0":0,"Rblow_m0":0,"RsmileOpen_m0":0,"Lpityful_m0":0,"MPB_Up_m0":0,"Lblow_m0":0,"Rsquint_m0":0,"RRbrowUp_m0":0,"Rdisgust_m0":0,"LbrowDown_m0":0,"LLbrowUp_m0":0,"Glotis_m0":0,"Ax_E_m0":0,"Rjaw_m0":0,"Lsad_m0":0,"RbrowUp_m0":0},{"val":0,"aro":1,"t_FV_m0":0,"t_UH_OO_m0":0,"t_AE_AA_m0":0,"t_JawCompress_m0":0,"CurlUp_Out_tg_m0":0,"t_S_m0":0,"Right_In_tg_m0":0,"t_Ljaw_m0":0,"CurlDown_Out_tg_m0":0,"t_UW_U_m0":0,"RRR_In_tg_m0":0,"t_Ax_E_m0":0,"t_MPB_m0":0,"Left_In_tg_m0":0,"LLL_In_tg_m0":0,"Up_tg_m0":0,"t_Shout_m0":0.6266666666666667,"t_Chew_m0":0,"t_JawFront_m0":0,"t_AO_a_m0":0,"Throat_In_tg_m0":0,"t_KG_m0":0,"t_SH_CH_m0":0,"t_H_EST_m0":0,"Compress_tg_m0":0,"CurlLeft_Out_tg_m0":0,"CurlRight_Out_tg_m0":0,"OutMiddle_tg_m0":0,"t_MouthOpen_m0":0,"t_TD_I_m0":0,"t_Rjaw_m0":0,"LlipSide_m0":0,"LLbrowDown_m0":0,"TD_I_m0":0,"RneckTension_m0":0,"RsmileClose_m0":0,"LsmileOpen_m0":0,"LbrowUp_m0":1.7933333333333332,"LneckTension_m0":0,"RRbrowDown_m0":0,"Rnostril_m0":0.98,"JawCompress_m0":0,"RlipCorner_m0":0,"RbrowDown_m0":0,"Lnostril_m0":0.9933333333333333,"LlipDown_m0":0,"S_m0":0,"ReyeOpen_m0":0.4666666666666667,"ReyeClose_m0":0,"LeyeClose_m0":0,"MPB_Down_m0":0,"LlipCorner_m0":0,"H_EST_m0":0,"Ljaw_m0":0,"Chew_m0":0,"Shout_m0":0.6266666666666667,"LeyeOpen_m0":0.4666666666666667,"MouthOpen_m0":0,"RlipDown_m0":0,"FV_m0":0,"KG_m0":0,"Lsquint_m0":0,"RmouthSad_m0":0,"Kiss_m0":0,"RlowLid_m0":0,"LmouthSad_m0":0,"JawFront_m0":0,"RlipSide_m0":0,"AE_AA_m0":0,"LlowLid_m0":0,"RlipUp_m0":0,"UH_OO_m0":0,"Rsad_m0":0,"LsmileClose_m0":0,"Ldisgust_m0":0,"SH_CH_m0":0,"UW_U_m0":0,"Chin_m0":0,"AO_a_m0":0,"Rpityful_m0":0,"LlipUp_m0":0,"Rblow_m0":0,"RsmileOpen_m0":0,"Lpityful_m0":0,"MPB_Up_m0":0,"Lblow_m0":0,"Rsquint_m0":0,"RRbrowUp_m0":0.84,"Rdisgust_m0":0,"LbrowDown_m0":0,"LLbrowUp_m0":0.84,'+
+                    '"Glotis_m0":0,"Ax_E_m0":0,"Rjaw_m0":0,"Lsad_m0":0,"RbrowUp_m0":1.7666666666666666},{"val":1,"aro":0,"t_FV_m0":0,"t_UH_OO_m0":0,"t_AE_AA_m0":0,"t_JawCompress_m0":0,"CurlUp_Out_tg_m0":0,"t_S_m0":0,"Right_In_tg_m0":0,"t_Ljaw_m0":0,"CurlDown_Out_tg_m0":0,"t_UW_U_m0":0,"RRR_In_tg_m0":0,"t_Ax_E_m0":0,"t_MPB_m0":0,"Left_In_tg_m0":0,"LLL_In_tg_m0":0,"Up_tg_m0":0,"t_Shout_m0":0,"t_Chew_m0":0,"t_JawFront_m0":0,"t_AO_a_m0":0,"Throat_In_tg_m0":0,"t_KG_m0":0,"t_SH_CH_m0":0,"t_H_EST_m0":0,"Compress_tg_m0":0,"CurlLeft_Out_tg_m0":0,"CurlRight_Out_tg_m0":0,"OutMiddle_tg_m0":0,"t_MouthOpen_m0":0,"t_TD_I_m0":0,"t_Rjaw_m0":0,"LlipSide_m0":0,"LLbrowDown_m0":0,"TD_I_m0":0,"RneckTension_m0":0,"RsmileClose_m0":0.88,"LsmileOpen_m0":0.6733333333333333,"LbrowUp_m0":0.8066666666666666,"LneckTension_m0":0,"RRbrowDown_m0":0,"Rnostril_m0":0,"JawCompress_m0":0,"RlipCorner_m0":0,"RbrowDown_m0":0,"Lnostril_m0":0,"LlipDown_m0":0,"S_m0":0,"ReyeOpen_m0":0,"ReyeClose_m0":0,"LeyeClose_m0":0,"MPB_Down_m0":0,"LlipCorner_m0":0,"H_EST_m0":0,"Ljaw_m0":0,"Chew_m0":0,"Shout_m0":0,"LeyeOpen_m0":0,"MouthOpen_m0":0,"RlipDown_m0":0,"FV_m0":0,"KG_m0":0,"Lsquint_m0":0.12,"RmouthSad_m0":0,"Kiss_m0":0,"RlowLid_m0":0,"LmouthSad_m0":0,"JawFront_m0":0,"RlipSide_m0":0,"AE_AA_m0":0,"LlowLid_m0":0,"RlipUp_m0":0,"UH_OO_m0":0,"Rsad_m0":0,"LsmileClose_m0":0.88,"Ldisgust_m0":0,"SH_CH_m0":0,"UW_U_m0":0,"Chin_m0":0,"AO_a_m0":0,"Rpityful_m0":0,"LlipUp_m0":0,"Rblow_m0":0,"RsmileOpen_m0":0.6933333333333334,"Lpityful_m0":0,"MPB_Up_m0":0,"Lblow_m0":0,"Rsquint_m0":0.12666666666666668,"RRbrowUp_m0":0,"Rdisgust_m0":0,"LbrowDown_m0":0,"LLbrowUp_m0":0,"Glotis_m0":0,"Ax_E_m0":0,"Rjaw_m0":0,"Lsad_m0":0,"RbrowUp_m0":0.8066666666666666},{"val":0.7682212795973759,"aro":0.6401843996644799,"t_FV_m0":0,"t_UH_OO_m0":0,"t_AE_AA_m0":0,"t_JawCompress_m0":0,"CurlUp_Out_tg_m0":0,"t_S_m0":0,"Right_In_tg_m0":0,"t_Ljaw_m0":0,"CurlDown_Out_tg_m0":0,"t_UW_U_m0":0,"RRR_In_tg_m0":0,"t_Ax_E_m0":0,"t_MPB_m0":0,"Left_In_tg_m0":0,"LLL_In_tg_m0":0,"Up_tg_m0":0,"t_Shout_m0":0,"t_Chew_m0":0,"t_JawFront_m0":0,"t_AO_a_m0":0,"Throat_In_tg_m0":0,"t_KG_m0":0,"t_SH_CH_m0":0,"t_H_EST_m0":0,"Compress_tg_m0":0,"CurlLeft_Out_tg_m0":0,"CurlRight_Out_tg_m0":0,"OutMiddle_tg_m0":0,"t_MouthOpen_m0":0.46,"t_TD_I_m0":0,"t_Rjaw_m0":0,"LlipSide_m0":0,"LLbrowDown_m0":0,"TD_I_m0":0,"RneckTension_m0":0,"RsmileClose_m0":0.9333333333333333,"LsmileOpen_m0":0.6466666666666666,"LbrowUp_m0":0.7666666666666667,"LneckTension_m0":0,"RRbrowDown_m0":0,"Rnostril_m0":0,"JawCompress_m0":0,"RlipCorner_m0":0,"RbrowDown_m0":0,"Lnostril_m0":0,"LlipDown_m0":0,"S_m0":0,"ReyeOpen_m0":0,"ReyeClose_m0":0,"LeyeClose_m0":0,"MPB_Down_m0":0,"LlipCorner_m0":0,"H_EST_m0":0,"Ljaw_m0":0,"Chew_m0":0,"Shout_m0":0,"LeyeOpen_m0":0,"MouthOpen_m0":0.46,"RlipDown_m0":0,"FV_m0":0,"KG_m0":0,"Lsquint_m0":0,"RmouthSad_m0":0,"Kiss_m0":0,"RlowLid_m0":0,"LmouthSad_m0":0,"JawFront_m0":0,"RlipSide_m0":0,"AE_AA_m0":0,"LlowLid_m0":0,"RlipUp_m0":0,"UH_OO_m0":0,"Rsad_m0":0,"LsmileClose_m0":0.9333333333333333,"Ldisgust_m0":0,"SH_CH_m0":0,"UW_U_m0":0,"Chin_m0":0,"AO_a_m0":0,"Rpityful_m0":0,"LlipUp_m0":0,"Rblow_m0":0,"RsmileOpen_m0":0.6533333333333333,"Lpityful_m0":0,"MPB_Up_m0":0,"Lblow_m0":0,"Rsquint_m0":0,"RRbrowUp_m0":0.32,"Rdisgust_m0":0,"LbrowDown_m0":0,"LLbrowUp_m0":0.30666666666666664,"Glotis_m0":0,"Ax_E_m0":0,"Rjaw_m0":0,"Lsad_m0":0,"RbrowUp_m0":0.8066666666666666},{"val":0.00529093123240946,"aro":-0.9999860029253879,"t_FV_m0":0,"t_UH_OO_m0":0,"t_AE_AA_m0":0,"t_JawCompress_m0":0,"CurlUp_Out_tg_m0":0,"t_S_m0":0,"Right_In_tg_m0":0,"t_Ljaw_m0":0,"CurlDown_Out_tg_m0":0,"t_UW_U_m0":0,"RRR_In_tg_m0":0,"t_Ax_E_m0":0,"t_MPB_m0":0,"Left_In_tg_m0":0,"LLL_In_tg_m0":0,"Up_tg_m0":0,"t_Shout_m0":0,"t_Chew_m0":0,"t_JawFront_m0":0,"t_AO_a_m0":0,"Throat_In_tg_m0":0,"t_KG_m0":0,"t_SH_CH_m0":0,"t_H_EST_m0":0,"Compress_tg_m0":0,"CurlLeft_Out_tg_m0":0,"CurlRight_Out_tg_m0":0,"OutMiddle_tg_m0":0,"t_MouthOpen_m0":0,"t_TD_I_m0":0,"t_Rjaw_m0":0,"LlipSide_m0":0,"LLbrowDown_m0":0,"TD_I_m0":0,"RneckTension_m0":0,"RsmileClose_m0":0,"LsmileOpen_m0":0,"LbrowUp_m0":0,"LneckTension_m0":0,"RRbrowDown_m0":0,"Rnostril_m0":0,"JawCompress_m0":0,"RlipCorner_m0":0,"RbrowDown_m0":0,"Lnostril_m0":0,"LlipDown_m0":0,"S_m0":0,"ReyeOpen_m0":0,"ReyeClose_m0":0.19333333333333333,"LeyeClose_m0":0.21333333333333335,"MPB_Down_m0":0.3333333333333333,"LlipCorner_m0":0,"H_EST_m0":0,"Ljaw_m0":0,"Chew_m0":0,"Shout_m0":0,"LeyeOpen_m0":0,"MouthOpen_m0":0,"RlipDown_m0":0,"FV_m0":0,"KG_m0":0,"Lsquint_m0":0.18666666666666668,"RmouthSad_m0":0.26,"Kiss_m0":0,"RlowLid_m0":0,"LmouthSad_m0":0.24666666666666667,"JawFront_m0":0,"RlipSide_m0":0,"AE_AA_m0":0,"LlowLid_m0":0,"RlipUp_m0":0,"UH_OO_m0":0,"Rsad_m0":0.25333333333333335,"LsmileClose_m0":0,"Ldisgust_m0":0,"SH_CH_m0":0,"UW_U_m0":0,"Chin_m0":0.6866666666666666,"AO_a_m0":0,"Rpityful_m0":0.4533333333333333,"LlipUp_m0":0,"Rblow_m0":0,"RsmileOpen_m0":0,"Lpityful_m0":0.44666666666666666,"MPB_Up_m0":0.22,"Lblow_m0":0,"Rsquint_m0":0.2,"RRbrowUp_m0":0,"Rdisgust_m0":0,"LbrowDown_m0":0,"'+
+                    'LLbrowUp_m0":0,"Glotis_m0":0,"Ax_E_m0":0,"Rjaw_m0":0.4,"Lsad_m0":0,"RbrowUp_m0":0},{"val":0.7358012193427397,"aro":-0.6771975824039375,"t_FV_m0":0,"t_UH_OO_m0":0,"t_AE_AA_m0":0,"t_JawCompress_m0":0,"CurlUp_Out_tg_m0":0,"t_S_m0":0,"Right_In_tg_m0":0,"t_Ljaw_m0":0,"CurlDown_Out_tg_m0":0,"t_UW_U_m0":0,"RRR_In_tg_m0":0,"t_Ax_E_m0":0,"t_MPB_m0":0,"Left_In_tg_m0":0,"LLL_In_tg_m0":0,"Up_tg_m0":0,"t_Shout_m0":0,"t_Chew_m0":0,"t_JawFront_m0":0,"t_AO_a_m0":0,"Throat_In_tg_m0":0,"t_KG_m0":0,"t_SH_CH_m0":0,"t_H_EST_m0":0,"Compress_tg_m0":0,"CurlLeft_Out_tg_m0":0,"CurlRight_Out_tg_m0":0,"OutMiddle_tg_m0":0,"t_MouthOpen_m0":0,"t_TD_I_m0":0,"t_Rjaw_m0":0,"LlipSide_m0":0,"LLbrowDown_m0":0,"TD_I_m0":0,"RneckTension_m0":0,"RsmileClose_m0":0.6866666666666666,"LsmileOpen_m0":0.06222086638349163,"LbrowUp_m0":0.074541830023787,"LneckTension_m0":0,"RRbrowDown_m0":0,"Rnostril_m0":0,"JawCompress_m0":0,"RlipCorner_m0":0,"RbrowDown_m0":0,"Lnostril_m0":0,"LlipDown_m0":0,"S_m0":0,"ReyeOpen_m0":0,"ReyeClose_m0":0.0001282442991569747,"LeyeClose_m0":0.00014151095079390313,"MPB_Down_m0":0.0002211108606154736,"LlipCorner_m0":0,"H_EST_m0":0,"Ljaw_m0":0,"Chew_m0":0,"Shout_m0":0,"LeyeOpen_m0":0,"MouthOpen_m0":0,"RlipDown_m0":0,"FV_m0":0,"KG_m0":0,"Lsquint_m0":0.011212689358210499,"RmouthSad_m0":0.00017246647128006944,"Kiss_m0":0,"RlowLid_m0":0,"LmouthSad_m0":0.00016362203685545048,"JawFront_m0":0,"RlipSide_m0":0,"AE_AA_m0":0,"LlowLid_m0":0,"RlipUp_m0":0,"UH_OO_m0":0,"Rsad_m0":0.00016804425406775997,"LsmileClose_m0":0.6733333333333333,"Ldisgust_m0":0,"SH_CH_m0":0,"UW_U_m0":0,"Chin_m0":0.0004554883728678756,"AO_a_m0":0,"Rpityful_m0":0.5333333333333333,"LlipUp_m0":0,"Rblow_m0":0,"RsmileOpen_m0":0.06406901092953593,"Lpityful_m0":0.5266666666666666,"MPB_Up_m0":0.0001459331680062126,"Lblow_m0":0,"Rsquint_m0":0.011837581974649888,"RRbrowUp_m0":0,"Rdisgust_m0":0,"LbrowDown_m0":0,"LLbrowUp_m0":0,"Glotis_m0":0,"Ax_E_m0":0,"Rjaw_m0":0.00026533303273856834,"Lsad_m0":0,"RbrowUp_m0":0.074541830023787},{"val":-1,"aro":0,"t_FV_m0":0,"t_UH_OO_m0":0,"t_AE_AA_m0":0,"t_JawCompress_m0":0,"CurlUp_Out_tg_m0":0,"t_S_m0":0,"Right_In_tg_m0":0,"t_Ljaw_m0":0,"CurlDown_Out_tg_m0":0,"t_UW_U_m0":0,"RRR_In_tg_m0":0,"t_Ax_E_m0":0,"t_MPB_m0":0,"Left_In_tg_m0":0,"LLL_In_tg_m0":0,"Up_tg_m0":0,"t_Shout_m0":0,"t_Chew_m0":0,"t_JawFront_m0":0,"t_AO_a_m0":0,"Throat_In_tg_m0":0,"t_KG_m0":0,"t_SH_CH_m0":0,"t_H_EST_m0":0,"Compress_tg_m0":0,"CurlLeft_Out_tg_m0":0,"CurlRight_Out_tg_m0":0,"OutMiddle_tg_m0":0,"t_MouthOpen_m0":0,"t_TD_I_m0":0,"t_Rjaw_m0":0,"LlipSide_m0":0,"LLbrowDown_m0":1,"TD_I_m0":0,"RneckTension_m0":0,"RsmileClose_m0":0,"LsmileOpen_m0":0,"LbrowUp_m0":0,"LneckTension_m0":0,"RRbrowDown_m0":1.0066666666666666,"Rnostril_m0":0.9866666666666667,"JawCompress_m0":0,"RlipCorner_m0":0,"RbrowDown_m0":0,"Lnostril_m0":0.9666666666666667,"LlipDown_m0":0,"S_m0":0,"ReyeOpen_m0":0,"ReyeClose_m0":0,"LeyeClose_m0":0,"MPB_Down_m0":0.5333333333333333,"LlipCorner_m0":0,"H_EST_m0":0,"Ljaw_m0":0,"Chew_m0":0,"Shout_m0":0,"LeyeOpen_m0":0,"MouthOpen_m0":0,"RlipDown_m0":0,"FV_m0":0,"KG_m0":0,"Lsquint_m0":0.12,"RmouthSad_m0":0.9933333333333333,'+
+                    '"Kiss_m0":0,"RlowLid_m0":0,"LmouthSad_m0":1.0133333333333334,"JawFront_m0":0,"RlipSide_m0":0,"AE_AA_m0":0,"LlowLid_m0":0,"RlipUp_m0":0,"UH_OO_m0":0,"Rsad_m0":0,"LsmileClose_m0":0,"Ldisgust_m0":0.26,"SH_CH_m0":0,"UW_U_m0":0,"Chin_m0":0.9866666666666667,"AO_a_m0":0,"Rpityful_m0":0.98,"LlipUp_m0":0,"Rblow_m0":0,"RsmileOpen_m0":0,"Lpityful_m0":0.9866666666666667,"MPB_Up_m0":0.98,"Lblow_m0":0,"Rsquint_m0":0.14,"RRbrowUp_m0":0,"Rdisgust_m0":0.24,"LbrowDown_m0":0,"LLbrowUp_m0":0,"Glotis_m0":0,"Ax_E_m0":0,"Rjaw_m0":0,"Lsad_m0":0,"RbrowUp_m0":0},{"val":-0.7317215709199387,"aro":-0.6816036551035045,"t_FV_m0":0,"t_UH_OO_m0":0,"t_AE_AA_m0":0,"t_JawCompress_m0":0,"CurlUp_Out_tg_m0":0,"t_S_m0":0,"Right_In_tg_m0":0,"t_Ljaw_m0":0,"CurlDown_Out_tg_m0":0,"t_UW_U_m0":0,"RRR_In_tg_m0":0,"t_Ax_E_m0":0,"t_MPB_m0":0,"Left_In_tg_m0":0,"LLL_In_tg_m0":0,"Up_tg_m0":0,"t_Shout_m0":0.11333333333333333,"t_Chew_m0":0,"t_JawFront_m0":0,"t_AO_a_m0":0,"Throat_In_tg_m0":0,"t_KG_m0":0,"t_SH_CH_m0":0,"t_H_EST_m0":0,"Compress_tg_m0":0,"CurlLeft_Out_tg_m0":0,"CurlRight_Out_tg_m0":0,"OutMiddle_tg_m0":0,"t_MouthOpen_m0":0,"t_TD_I_m0":0,"t_Rjaw_m0":0,"LlipSide_m0":0,"LLbrowDown_m0":1,"TD_I_m0":0,"RneckTension_m0":0.9866666666666667,"RsmileClose_m0":0,"LsmileOpen_m0":0,"LbrowUp_m0":0,"LneckTension_m0":0.9866666666666667,"RRbrowDown_m0":0.9933333333333333,"Rnostril_m0":0.8733333333333333,"JawCompress_m0":0,"RlipCorner_m0":0,"RbrowDown_m0":0.9866666666666667,"Lnostril_m0":0.8666666666666667,"LlipDown_m0":0,"S_m0":0,"ReyeOpen_m0":0,"ReyeClose_m0":0,"LeyeClose_m0":0,"MPB_Down_m0":0,"LlipCorner_m0":0,"H_EST_m0":0,"Ljaw_m0":0,"Chew_m0":0,"Shout_m0":0.12,"LeyeOpen_m0":0,"MouthOpen_m0":0,"RlipDown_m0":0,"FV_m0":0,"KG_m0":0,"Lsquint_m0":0.2,"RmouthSad_m0":0.4866666666666667,"Kiss_m0":0,"RlowLid_m0":0,"LmouthSad_m0":0.49333333333333335,"JawFront_m0":0,"RlipSide_m0":0,"AE_AA_m0":0,"LlowLid_m0":0,"RlipUp_m0":0,"UH_OO_m0":0,"Rsad_m0":0,"LsmileClose_m0":0,"Ldisgust_m0":1.0133333333333334,"SH_CH_m0":0,"UW_U_m0":0,"Chin_m0":0,"AO_a_m0":0,"Rpityful_m0":0,"LlipUp_m0":0,"Rblow_m0":0,"RsmileOpen_m0":0,"Lpityful_m0":0,"MPB_Up_m0":0,"Lblow_m0":0,"Rsquint_m0":0.22,"RRbrowUp_m0":0,"Rdisgust_m0":0.9933333333333333,"LbrowDown_m0":1.0066666666666666,"LLbrowUp_m0":0,"Glotis_m0":0,"Ax_E_m0":0,"Rjaw_m0":0,"Lsad_m0":0,"RbrowUp_m0":0},{"val":-0.7225065746934279,"aro":0.6913640499221595,"t_FV_m0":0,"t_UH_OO_m0":0,"t_AE_AA_m0":0,"t_JawCompress_m0":0,"CurlUp_Out_tg_m0":0,"t_S_m0":0,"Right_In_tg_m0":0,"t_Ljaw_m0":0,"CurlDown_Out_tg_m0":0,"t_UW_U_m0":0,"RRR_In_tg_m0":0,"t_Ax_E_m0":0,"t_MPB_m0":0,"Left_In_tg_m0":0,"LLL_In_tg_m0":0,"Up_tg_m0":0,"t_Shout_m0":0.5133333333333333,"t_Chew_m0":0,"t_JawFront_m0":0,"t_AO_a_m0":0,"Throat_In_tg_m0":0,"t_KG_m0":0,"t_SH_CH_m0":0,"t_H_EST_m0":0,"Compress_tg_m0":0,"CurlLeft_Out_tg_m0":0,"CurlRight_Out_tg_m0":0,"OutMiddle_tg_m0":0,"t_MouthOpen_m0":0,"t_TD_I_m0":0,"t_Rjaw_m0":0,"LlipSide_m0":0,"LLbrowDown_m0":0.16,"TD_I_m0":0,"RneckTension_m0":0,"RsmileClose_m0":0,"LsmileOpen_m0":0,"LbrowUp_m0":0.45582169319532817,"LneckTension_m0":0,"RRbrowDown_m0":0.7466666666666667,"Rnostril_m0":0.24909215204354365,"JawCompress_m0":0.18,"RlipCorner_m0":0,"RbrowDown_m0":0,"Lnostril_m0":0.2524811609148844,"LlipDown_m0":0.4866666666666667,"S_m0":0,"ReyeOpen_m0":0.29333333333333333,"ReyeClose_m0":0,"LeyeClose_m0":0,"MPB_Down_m0":0,"LlipCorner_m0":0,"H_EST_m0":0,"Ljaw_m0":0,"Chew_m0":0,"Shout_m0":0.5133333333333333,"LeyeOpen_m0":0.2866666666666667,"MouthOpen_m0":0,"RlipDown_m0":0.49333333333333335,"FV_m0":0,"KG_m0":0,"Lsquint_m0":-0.20666666666666667,"RmouthSad_m0":0,"Kiss_m0":0,"RlowLid_m0":0,"LmouthSad_m0":0,"JawFront_m0":0,"RlipSide_m0":0,"AE_AA_m0":0,"LlowLid_m0":0,"RlipUp_m0":0,"UH_OO_m0":0,"Rsad_m0":0,"LsmileClose_m0":0,"Ldisgust_m0":0.47333333333333333,"SH_CH_m0":0,"UW_U_m0":0,"Chin_m0":0,"AO_a_m0":0,"Rpityful_m0":1,"LlipUp_m0":0,"Rblow_m0":0,"RsmileOpen_m0":0,"Lpityful_m0":0.9933333333333333,"MPB_Up_m0":0,"Lblow_m0":0,"Rsquint_m0":-0.2,"RRbrowUp_m0":0.213507558894466,"Rdisgust_m0":0,"LbrowDown_m0":0,"LLbrowUp_m0":0.213507558894466,"Glotis_m0":0,"Ax_E_m0":0,"Rjaw_m0":0,"Lsad_m0":0,"RbrowUp_m0":0.44904367545264673}]');
+};
+
+
+PITforRomeoModel = function(){
+	return JSON.parse('[{"val":0,"aro":0,"smile":0,"sad":0,"kiss":0,"lipsClosed":0,"jaw":0,"browsUp":0,"browsDown":0,"browsInnerUp":0,"eyeLids":0},{"val":0,"aro":1,"smile":0,"sad":0,"kiss":0.344,"lipsClosed":0.344,"jaw":0.7,"browsUp":1,"browsDown":0,"browsInnerUp":0,"eyeLids":-0.3},{"val":0.5,"aro":0.866,"smile":1,"sad":0,"kiss":0,"lipsClosed":0,"jaw":0.6,"browsUp":0,"browsDown":0.346,"browsInnerUp":0.732,"eyeLids":0},{"val":0.866,"aro":0.5,"smile":0.7,"sad":0,"kiss":0,"lipsClosed":0,"jaw":0,"browsUp":0.763,"browsDown":0.53,"browsInnerUp":0,"eyeLids":0},{"val":0.9999797158186168,"aro":-0.006369297552984821,"smile":0.62,"sad":0,"kiss":0.38666666666666666,"lipsClosed":0,"jaw":0,"browsUp":0.116,"browsDown":0,"browsInnerUp":0.2,"eyeLids":0.1},{"val":0.707,"aro":-0.707,"smile":0,"sad":0,"kiss":0.675,"lipsClosed":0,"jaw":0.3,"browsUp":0.216,"browsDown":0.38,"browsInnerUp":0.2,"eyeLids":0.3},{"val":0.006134853874888963,"aro":-0.999981181606901,"smile":0,"sad":0.07333333333333333,"kiss":0,"lipsClosed":0.6933333333333334,"jaw":0,"browsUp":-0.3466666666666667,"browsDown":0,"browsInnerUp":0.25333333333333335,"eyeLids":0.5},{"val":-0.707,"aro":-0.707,"smile":0,"sad":1,"kiss":0,"lipsClosed":0,"jaw":0.5,"browsUp":0,"browsDown":1,"browsInnerUp":0,"eyeLids":0.6},{"val":-1,"aro":0,"smile":0,"sad":0.86,"kiss":0.09333333333333334,"lipsClosed":0.441,"jaw":0,"browsUp":-0.29333333333333333,"browsDown":0,"browsInnerUp":0.9,"eyeLids":0.3466666666666667},{"val":-0.866,"aro":0.5,"smile":0.527,"sad":0.92,"kiss":0.757,"lipsClosed":0,"jaw":0.25,"browsUp":0.366,"browsDown":0.989,"browsInnerUp":0,"eyeLids":-0.6},{"val":-0.5,"aro":0.866,"smile":0.57,"sad":0.391,"kiss":0.462,"lipsClosed":0.591,"jaw":1,"browsUp":0,"browsDown":0,"browsInnerUp":0.981,"eyeLids":0}]');
+};
