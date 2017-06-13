@@ -7,14 +7,20 @@ LS.Globals.FT = this;
 // TODO: in facial control, correspondance of morph target names and BML and pit
 // TODO: include sliders of bone transformations
 // TODO: include markers for BS that are used for FacialControl and for LipSync etc...
+// TODO: include facial expression tags
 
 // Pit can be defined on the scene and stored
 this.pit = [];
+// Lipsync can be defined on the scene and stored
+this.LS = null;
 
-this.faceModel = "customRomeo";
-//this.faceModels = ["customRomeo", "autodeskCharGen"];
+// List of facial models
+this.createProperty("faceModel", "autodeskCharGen", {type: "string", widget: "combo", values:["autodeskCharGen", "customRomeo", "default"]});
+  
 
 this.lipsyncModel = "threeLS";
+
+this.linkBlendShapes = true;
 
 this.showGUI = true;
 
@@ -34,11 +40,11 @@ this.onStart = function()
   this.bswPIT = {};
   // Get morph targets
   // TODO: get bones, get multiple meshes with morph targets
-  this.maxMorphPerNode = 0; //GUI
+  this._maxMorphPerNode = 0; //GUI
   var morphTargets = this.findMorphTargets();
   if (morphTargets.length != 0){
     this.morphTargets = morphTargets;
-   	this.mtN = this.morphTargets.length;
+   	this._mtN = this.morphTargets.length;
   } else
     console.warn("Morph targets not found in children");
   
@@ -61,16 +67,22 @@ this.onStart = function()
   
   
   // Lipsync module
-  if (this.lipsyncModel == "threeLS"){
-    if (typeof ThreeLS !== "undefined")
-      this.LS = new ThreeLS();
-  } else if (this.lipsyncModel == "LipSyncJP"){
-   	if (typeof LipSyncJP !== "undefined"){
-      // jawOpen: {nameBS: weight, nameBS2, weight}, mouthX: {nameBS3: weight}...
-      this.LS = new LipSyncJP();
-      // TODO: modify script of lipsyncing to have BSW instead of visemes
-      this.LS.BSW = {jawOpen: {}, smile: {}, mouthAir: {}, lipsClosed: {}, sad:{}};
-    } 
+  if (!this.LS){//Use the one defined in the scene
+		this.defineLipsync();
+  }
+  
+  // Natural Neighbour Interpolation for facial expressions
+  if (typeof LS.Components.NNI === "function"){
+    // Check if already added
+    if (node.getComponent(LS.Components.NNI)){
+    	this.NNI = node.getComponent(LS.Components.NNI);
+    } else {
+      this.NNI = new LS.Components.NNI();
+      node.addComponent(this.NNI);
+      this.NNI.onStart();
+    }
+    this.NNI.GUIX = 530;
+    this.NNI.GUIY = 40;
   }
   
   
@@ -100,7 +112,7 @@ this.findMorphTargets = function(){
       if (morphComp !== null){
         var morphTargetsNode = morphComp.morph_targets;
         // Check maximum per node for GUI representation
-        if (this.maxMorphPerNode<morphTargetsNode.length) this.maxMorphPerNode = morphTargetsNode.length;
+        if (this._maxMorphPerNode<morphTargetsNode.length) this._maxMorphPerNode = morphTargetsNode.length;
         // Find names
         this.findMorphNames(morphTargetsNode, node.childNodes[i].name);
         // Add to morph targets array
@@ -108,6 +120,8 @@ this.findMorphTargets = function(){
       }
   	}
   }
+  // Link morph targets from different meshes (i.e. teeth-head meshes)
+  this.linkMorphTargets(morphTargetsAgent);
   
   return morphTargetsAgent;
 }
@@ -139,7 +153,20 @@ this.findMorphNames = function(morphTargets, nodeName){
     console.error("Something wrong in findMorphNames", morphTargets);
 }
 
-
+// If several meshes with morph targets, link the ones with the same name
+this.linkMorphTargets = function(mt){
+  // Find different nodes in morphTargets(mt)
+  for (var i = 0; i<mt.length; i++){
+    for (var j = 0; j < mt.length; j++){
+    	if (i == j) continue;
+      if (mt[i].name.includes(mt[j].name) && mt[i].node != mt[j].node){
+      	// Link
+        mt[i].linked = j;
+        mt[j].linked = i;
+      } 
+    }
+  }
+}
 
 
 
@@ -151,7 +178,8 @@ this.VA2BSW = function(valAro, pit){
     return [];
 
   limDist = 0.8;
-  var BSW = this.bswPIT; // Memory saving
+  // Reset weights of output
+  var BSW = this.bswPIT; // Memory management
   var keysBS = Object.keys(pit[0]); // plus val and aro
   var numBS = keysBS.length-2;
   for (var i = 0; i<keysBS.length; i++){
@@ -171,52 +199,74 @@ this.VA2BSW = function(valAro, pit){
   var weightV = this._weightPIT;
   var maxWeight = 0;
   
-  //TODO: voronoi and delaunay
+  // Voronoi and Natural Neighbour Interpolation
   //https://en.wikipedia.org/wiki/Delaunay_triangulation
   //http://alexbeutel.com/webgl/voronoi.html
+  // Add or move NNI averaging point
+  if (this.NNI){
+  	this.NNI.moveNNIPoint(valAro[0]*0.5 + 0.5, valAro[1]*0.5 + 0.5);
+  	var NNIWeights = this.NNI.getWeights();
+    // Find NNI percentage and distance
+    for (var i = 0; i < pit.length; i++){
+      var exprId = pit[i].exprId;
+      if (exprId){
+        // Percentage is different from 0
+        if (NNIWeights[exprId]){
+          // TODO: save into array pit indice and percentage to iterate once over blendshapes
+          for (var j = 0; j < keysBS.length; j++){
+          	if (keysBS[j] == "val" || keysBS[j] == "aro") continue;
+            var bsName = keysBS[j];
+            BSW[bsName] += pit[i][bsName] * NNIWeights[exprId];
+          }
+        }
+      }
+    }
+  }
   
+  else{
+    // Modified Marco's distance based approach
+    for (var i = 0; i < pit.length; i++){
 
-  for (var i = 0; i < pit.length; i++){
-    
-    var pitValAro = pit[i];
-    
-    this._pA[0] = pitValAro.val;
-    this._pA[1] = pitValAro.aro;
+      var pitValAro = pit[i];
 
-    var dist = vec3.dist(this._pA, this._p);
-    var weight = (limDist - dist)/limDist;
-    
-    // If the emotion (each row is an emotion in pit) is too far away from the act-eval point, discard
-    if (weight > 0){
-      weightV[i] = weight;
-      // Many pitValAro can be affecting
-      cumWeight += weight;
-      maxWeight = weight>maxWeight ? weight : maxWeight;
-      
-    } else {
-      weightV[i] = 0;
+      this._pA[0] = pitValAro.val;
+      this._pA[1] = pitValAro.aro;
+
+      var dist = vec3.dist(this._pA, this._p);
+      var weight = (limDist - dist)/limDist;
+
+      // If the emotion (each row is an emotion in pit) is too far away from the act-eval point, discard
+      if (weight > 0){
+        weightV[i] = weight;
+        // Many pitValAro can be affecting
+        cumWeight += weight;
+        maxWeight = weight>maxWeight ? weight : maxWeight;
+
+      } else {
+        weightV[i] = 0;
+      }
     }
-  }
 
-  // Prioritaze closest expression
-  if (cumWeight > 1){
+    // Prioritaze closest expression
+    if (cumWeight > 1){
+      for (var ii = 0; ii < pit.length; ii++){
+        weightV[ii] = Math.pow(weightV[ii], cumWeight);
+        cumWeightBal = weightV[ii];
+      }
+    }
+
+    // Balance if expressions are very close and contribute too much
     for (var ii = 0; ii < pit.length; ii++){
-			weightV[ii] = Math.pow(weightV[ii], cumWeight);
-      cumWeightBal = weightV[ii];
-    }
-  }
+      var pitValAro = pit[ii];
 
-  // Balance if expressions are very close and contribute too much
-  for (var ii = 0; ii < pit.length; ii++){
-    var pitValAro = pit[ii];
-
-    for (var i = 0; i < keysBS.length; i++){
-			if (keysBS[i] == "val" || keysBS[i] == "aro") continue;   
-      var bsName = keysBS[i];
-     	if (cumWeightBal>1)
-    		BSW[bsName] += pitValAro[bsName] * weightV[ii]/cumWeightBal;//this._pit[ii*bNumber +i+2] * weightV[ii]/cumWeightBal;
-      else
-        BSW[bsName] += pitValAro[bsName] * weightV[ii];//this._pit[ii*bNumber +i+2] * weightV[ii];
+      for (var i = 0; i < keysBS.length; i++){
+        if (keysBS[i] == "val" || keysBS[i] == "aro") continue;   
+        var bsName = keysBS[i];
+        if (cumWeightBal>1)
+          BSW[bsName] += pitValAro[bsName] * weightV[ii]/cumWeightBal;//this._pit[ii*bNumber +i+2] * weightV[ii]/cumWeightBal;
+        else
+          BSW[bsName] += pitValAro[bsName] * weightV[ii];//this._pit[ii*bNumber +i+2] * weightV[ii];
+      }
     }
   }
   
@@ -236,7 +286,7 @@ this.defineDefaultPit = function(modelName){
 		pit = new PITforAutodeskCharGen();
   } 
   // Default pit
-  else if (modelName == "customRomeo" && pitForRomeoModel){
+  else if (modelName == "customRomeo" && typeof PITforRomeoModel != "undefined"){
     var blendNames = {smile:"smile", sad:"sad", kiss:"kiss", lipsClosed:"lipsClosed", jaw:"jaw", 
                       browsUp:"eyebrowUp", browsDown:"eyebrowDown", browsInnerUp:"eyebrowInnerUp", eyeLids:"eyelids"};
     
@@ -373,6 +423,44 @@ this.redefinePit = function(pit, blendNames){
 
 
 
+// Define lip syncing strategy
+this.defineLipsync = function(){
+  if (this.lipsyncModel == "threeLS"){
+    if (typeof ThreeLS !== "undefined"){
+      this.LS = new ThreeLS();
+      // Define relationship between lipsync blendshapes and scene BS
+      this.LS.visemes = {}; 
+
+      var lsKeys = Object.keys(this.LS.BSW);
+      for (var i = 0; i<lsKeys.length; i++)
+        this.LS.visemes[lsKeys[i]] = {};
+
+     	// Use predefined model for autodeskCharGen
+      if (this.faceModel == "autodeskCharGen"){
+        this.LS.visemes = JSON.parse('{"kiss":{"Kiss_m0":1},"lipsClosed":{"MPB_Up_m0":1,"MPB_Down_m0":1},"jaw":{"t_AE_AA_m0":1,"AE_AA_m0":1}}');
+        // Mark morph targets with ls flag
+        for (var i = 0; i<this.morphTargets.length; i++){
+          var mt = this.morphTargets[i];
+          if (mt.ls) continue;
+          for (var j = 0; j<lsKeys.length; j++){
+            var lsMorphs = Object.keys(this.LS.visemes[lsKeys[j]]);
+            for (var k = 0; k<lsMorphs.length; k++){
+              if (mt.name == lsMorphs[k]) mt.ls = true;
+            }
+          }
+        }
+      }
+    }
+  } else if (this.lipsyncModel == "LipSyncJP"){
+    if (typeof LipSyncJP !== "undefined"){
+      // jawOpen: {nameBS: weight, nameBS2, weight}, mouthX: {nameBS3: weight}...
+      this.LS = new LipSyncJP();
+      // TODO: modify script of lipsyncing to have BSW instead of visemes
+      this.LS.visemes = {jawOpen: {}, smile: {}, mouthAir: {}, lipsClosed: {}, sad:{}};
+    } 
+  } 
+}
+
 
 
 
@@ -387,6 +475,8 @@ this.redefinePit = function(pit, blendNames){
 // Facial tools to define pit
 this.val = 0.00; this.aro = 0.00;
 this._rect={x:0,y:0,w:0,h:0};
+this._circleF = {x:0,y:0,r:0};
+this._circleLS = {x:0,y:0,r:0};
 this._levelEdit = "";
 this.onRenderGUI = function(){
   
@@ -397,6 +487,8 @@ this.onRenderGUI = function(){
   var w = width = gl.viewport_data[2];
   var h = height = gl.viewport_data[3];
   var rect = this._rect;
+  var circleF = this._circleF;
+  var circleLS = this._circleLS;
   
   gl.start2D();
   
@@ -425,16 +517,23 @@ this.onRenderGUI = function(){
       this._clickedId = "ww";
       // Create Candidate
       this._candidate = {};
-
     }
     // Delete expression
     if (gl.mouse.right_button){
       if (this._selExpr !== null){
+        // Remove NNI point
+        if (this.NNI)
+          this.NNI.removePoint(this.pit[this._selExpr].exprId);
+        // Remove from pit
         this.pit.splice(this._selExpr, 1);
         this._selExpr = null;
-      } else if (this._candidate)
+        
+      } else if (this._candidate){
         this._candidate = null;
-      else if (this._levelEdit.includes("editExpr"))
+        // Remove NNI averaging point
+        if (this.NNI)
+          this.NNI.removeNNIPoint();
+      } else if (this._levelEdit.includes("editExpr"))
         this._levelEdit = "";
     }
     if (gl.mouse.middle_button){}
@@ -459,7 +558,11 @@ this.onRenderGUI = function(){
       var numExpr = this._selExpr || this._levelEdit.split("_")[1] || 0;
       this.pit[numExpr].val = this.val;
       this.pit[numExpr].aro = this.aro;
-
+      // Move NNI point - exprId is the name of the point (hex color)
+      if (this.pit[numExpr].exprId && this.NNI){
+      	this.NNI.movePoint(this.pit[numExpr].exprId, this.val*0.5 + 0.5, this.aro*0.5+0.5);
+      }
+      
       this._levelEdit = "editExpr_" + numExpr;
       this._candidate = null;
 			// Assign and modify face
@@ -469,11 +572,11 @@ this.onRenderGUI = function(){
           this.morphTargets[i].weight = this.pit[numExpr][bsName];
       }
     }
-    // New candidate
+    // Dragging new candidate
     if (this._candidate){
       this._candidate.val = this.val;
       this._candidate.aro = this.aro;
-      
+      // Add NNI option in VA2BSW
       var bsw = this.VA2BSW([this.val, this.aro], this.pit);
       
       // Assign and modify face
@@ -512,6 +615,7 @@ this.onRenderGUI = function(){
   
   
   // Store candidate button or Reset pit
+  // TODO - add download pit
   rect={x:w-wwX+wwR,y:wwY/4,w:150,h:20};
   // Interaction
   if (gl.mouse.x < rect.x + rect.w && gl.mouse.x > rect.x &&
@@ -546,7 +650,14 @@ this.onRenderGUI = function(){
               var mt = this.morphTargets[i];
               //if (mt.weight != 0)
               	this._candidate[mt.name] = mt.weight;
+              // Add f flag (facial)
+              mt.f = true;
             }
+          }
+          // Add NNI point
+          if (this.NNI){
+            var point = this.NNI.addPoint(this._candidate.val*0.5 + 0.5, this._candidate.aro*0.5 + 0.5);
+          	this._candidate.exprId = point.name;
           }
           this.pit.push(this._candidate);
           this._candidate = null;
@@ -577,6 +688,10 @@ this.onRenderGUI = function(){
       } 
       // Reset pit
       else {
+        // Remove all NNI points
+        if (this.NNI)
+        	this.NNI.reset();
+        // Reset pit
         this.pit = [];
       }
       console.log("Number of facial expressions", this.pit.length);
@@ -652,7 +767,7 @@ this.onRenderGUI = function(){
   
   // LIPSYNC CONFIGURATION
   if (this.LS) {
-    var lsKeys = Object.keys(this.LS.BSW);
+    var lsKeys = Object.keys(this.LS.visemes);
     
     var maxHrect = 30;
     var startH = wwY + wwR + 100;
@@ -692,7 +807,7 @@ this.onRenderGUI = function(){
         this.visemeCand = {};
         this.visemeCand[lsKeys[i]] = {};
         // Display current values
-        var visemeBSW = this.LS[lsKeys[i]];
+        var visemeBSW = this.LS.visemes[lsKeys[i]];
         var visKeys = Object.keys(visemeBSW);
         var mt = this.morphTargets;
         for (var j = 0; j<mt.length; j++){
@@ -719,10 +834,52 @@ this.onRenderGUI = function(){
  	 		gl.fillText(lsKeys[i], rect.x + rect.w/2, rect.y +3*rect.h/4);
     }
     
+    
+    
+    // THREELS CONFIGURATION
+    // Show three sliders to configure lipsync
+    if (this.LS.constructor === ThreeLS){
+      var feats = ["smoothness", "threshold", "pitch"];
+      var ranges = [0,1,    -0.7,0.7,      0.5, 1.5];
+      for (var i = 0; i<feats.length; i++){
+        rect = {x:wPos + wSq*1.25,y:startH+i*hSq,w:wSq, h:hSq*0.75};
+
+         // Interaction
+        if (gl.mouse.x < rect.x + rect.w && gl.mouse.x > rect.x &&
+          h-gl.mouse.y < rect.y + rect.h && h-gl.mouse.y > rect.y &&
+           !this._clicked){
+          // On click && dragg -> set value
+          if (gl.mouse.left_button){
+          	var value = (gl.mouse.x - rect.x)/(rect.w);
+            var rangedValue = value*(ranges[i*2+1]-ranges[i*2]) + ranges[i*2];
+            this.LS[feats[i]] = rangedValue;
+          }
+					gl.fillStyle = "rgba(255,255,255,0.7)";
+        } else
+          gl.fillStyle = "rgba(255,255,255,0.3)";
+        // Paint rectangle
+        gl.fillRect(rect.x,rect.y,rect.w,rect.h);
+        // Paint text
+        gl.fillStyle = "rgba(255,255,255,0.9)";
+        gl.fillText(feats[i] + ", " + this.LS[feats[i]].toFixed(2), rect.x + rect.w/2, rect.y +3*rect.h/4);
+        // Paint slider
+        gl.beginPath();
+        var normWeight = this.LS[feats[i]]/(ranges[i*2+1]-ranges[i*2]) - ranges[i*2];
+        gl.moveTo(rect.x + normWeight*rect.w, rect.y);
+        gl.lineTo(rect.x + normWeight*rect.w, rect.y + rect.h);
+        gl.strokeStyle = "rgba(255,255,255,0.9)";
+        gl.stroke();
+      }
+    }
+    
+    
+    
+    
+    
     // STORE VISEME
     // Edit viseme
     if (this.visemeCand){
-      var i = lsKeys.length;
+      //var i = lsKeys.length;
       rect = {x:wPos + wSq*1.25,y: startH - hSq,w:wSq, h:hSq*0.75};
       
       // Interaction
@@ -736,10 +893,12 @@ this.onRenderGUI = function(){
           this._clicked = true;
           // STORE VISEME
           var mt = this.morphTargets;
-          var visemeBS = this.LS[Object.keys(this.visemeCand)[0]];
+          var visemeBS = this.LS.visemes[Object.keys(this.visemeCand)[0]];
           for (var i = 0; i<mt.length; i++){
             if (mt[i].weight != 0){
               visemeBS[mt[i].name] = mt[i].weight;
+              // Add ls flag
+              mt[i].ls = true;
             }
           }
           this.visemeCand = null;
@@ -760,6 +919,69 @@ this.onRenderGUI = function(){
   		gl.fillStyle = "rgba(255,255,255,0.9)";
  	 		gl.fillText("Store viseme", rect.x + rect.w*0.95/2, rect.y +3*rect.h/4);
     }
+    
+    
+    
+    
+    // TEST LIPSYNC
+    else if (this.lipsyncModel == "threeLS"){
+      rect = {x:wPos + wSq*1.25,y: startH - hSq,w:wSq*1.25, h:hSq*0.75};
+
+      
+       // Interaction
+      if (gl.mouse.x < rect.x + rect.w && gl.mouse.x > rect.x &&
+          h-gl.mouse.y < rect.y + rect.h && h-gl.mouse.y > rect.y){// &&
+         //!this._clicked){
+    		gl.fillStyle = "rgba(255,255,255,0.8)";
+        
+        // Clicked inside
+        if (gl.mouse.left_button && !this._clicked){
+          this._clicked = true;
+          // Start lipsync
+          this.LS.start();
+          console.log("here");
+        } else if (gl.mouse.left_button){
+          // Update
+          this.LS.update();
+          // Display current values
+          for (var i = 0; i<lsKeys.length; i++){
+            // Weight of LS BS (kiss, lipsClosed, jaw for threeLS)
+            var bsw = this.LS.BSW[lsKeys[i]];
+            // Assign to BS of scene
+            var visemeBSW = this.LS.visemes[lsKeys[i]];
+          	var visKeys = Object.keys(visemeBSW);
+            var mt = this.morphTargets;
+            for (var j = 0; j<mt.length; j++){
+              for (var k = 0; k<visKeys.length; k++){
+                if (mt[j].name == visKeys[k])
+                  mt[j].weight = visemeBSW[visKeys[k]] * bsw;
+              }
+            }
+          }
+          // Color variation
+          var sinVariation = Math.sin(2*Math.PI*getTime()/1000);
+        	var color = sinVariation*100 + 155;
+      		gl.fillStyle = "rgba("+color+",0,0,0.5)"; 
+        }
+        
+      } 
+      else{
+        if (this.LS.working)
+          this.LS.stop();
+        
+        gl.fillStyle = "rgba(255,255,255,0.5)";
+      }
+      
+      
+      // Paint rectangle
+      gl.fillRect(rect.x,rect.y,rect.w,rect.h);
+      // Paint text
+      gl.font = "15px Arial";
+      gl.textAlign = "center";
+      gl.fillStyle = "rgba(255,255,255,0.9)";
+      gl.fillText("Hold to test LS", rect.x + rect.w*0.95/2, rect.y +3*rect.h/4);
+    }
+       
   }
   
   
@@ -773,11 +995,12 @@ this.onRenderGUI = function(){
   // SHOW MORPH TARGETS
   // Morph Targets
   if (this.morphTargets){
+    
     gl.font = "10px Arial";
   	gl.textAlign = "center";
     var mt = this.morphTargets;
     
-    var hSq = Math.min(30, h*0.7/this.maxMorphPerNode);//mt.length);
+    var hSq = Math.min(30, h*0.7/this._maxMorphPerNode);//mt.length);
     var startWminus = 300;
     var node = "";
     var prevNode = "";
@@ -792,6 +1015,9 @@ this.onRenderGUI = function(){
       rect={x:w-startWminus - nodeCount*150*1.5,
             y:0.07*h + (i-nodeIndex)*hSq*1.25,
             w:150,h:hSq*0.75};
+      
+      circleF={x: rect.x-hSq, y: rect.y+hSq/3, r: hSq/3};
+      circleLS={x: rect.x-hSq*2, y: rect.y+hSq/3, r: hSq/3};
       
       // Interaction
       if (gl.mouse.x < rect.x + rect.w && gl.mouse.x > rect.x &&
@@ -814,7 +1040,6 @@ this.onRenderGUI = function(){
       } else
       	gl.fillStyle = "rgba(255,255,255,0.3)";
       // Paint rectangle
-      
   		gl.fillRect(rect.x,rect.y,rect.w,rect.h);
       // Paint text
   		gl.fillStyle = "rgba(255,255,255,0.9)";
@@ -826,16 +1051,84 @@ this.onRenderGUI = function(){
       gl.strokeStyle = "rgba(255,255,255,0.9)";
       gl.stroke();
       
+      
+      //Clicked inside circle
+      var dist = Math.sqrt((gl.mouse.x - circleF.x)*(gl.mouse.x - circleF.x) + (-gl.mouse.y + h - circleF.y)*(-gl.mouse.y + h - circleF.y));
+      if (dist<circleF.r*1.4 && !this._clicked){
+        gl.fillStyle = "rgba(255,0,0,0.7)";
+        gl.strokeStyle = "rgba(255,255,255,0.7)";
+      } else{
+        gl.strokeStyle = "rgba(255,255,255,0.3)";
+        gl.fillStyle = "rgba(255,0,0,0.3)";
+      }
+      // Paint circleF
+      gl.lineWidth = 2;
+      gl.beginPath();
+      gl.arc(circleF.x,circleF.y,circleF.r,0,2*Math.PI);
+      gl.fill();
+      gl.stroke();
+      
+      
+      // Add and remove morph targets to lipsyncing
+      if (this.LS){
+        lsKeys = Object.keys(this.LS.visemes);
+        //Clicked inside circle
+        var dist = Math.sqrt((gl.mouse.x - circleLS.x)*(gl.mouse.x - circleLS.x) + (-gl.mouse.y + h - circleLS.y)*(-gl.mouse.y + h - circleLS.y));
+        if (dist<circleLS.r*1.4 && !this._clicked){
+          if (gl.mouse.left_button){
+            this._clicked = true;
+            // Remove blend shape from visemes of LS
+            if (mt[i].ls){
+              for (var j = 0; j<lsKeys.length; j++){
+                var lsmt = Object.keys(this.LS.visemes[lsKeys[j]]);
+                for (var k = 0; k<lsmt.length; k++){
+                  if (mt[i].name == lsmt[k]){
+                    mt[i].ls = false;
+                    delete this.LS.visemes[lsKeys[j]][lsmt[k]];
+                  }
+                }
+              }
+            }
+            // Add weight (0?) to LS to all visemes
+            else {
+							
+            }
+          }
+
+          gl.fillStyle = "rgba(0,255,0,0.7)";
+          gl.strokeStyle = "rgba(255,255,255,0.7)";
+        } else{
+          gl.fillStyle = "rgba(0,255,0,0.3)";
+          gl.strokeStyle = "rgba(255,255,255,0.3)";
+        }
+        if (mt[i].ls){
+          // Paint circleLS
+          gl.lineWidth = 2;
+          gl.beginPath();
+          gl.arc(circleLS.x,circleLS.y,circleLS.r,0,2*Math.PI);
+          gl.fill();
+          gl.stroke();
+        } else{
+          
+        }
+      }
+      
+      
       // Change weight of clicked morph target
       if (this._clicked && gl.mouse.dragging && this._clickedId == i){
         mt[i].weight = (gl.mouse.x - rect.x)/(rect.w);
+        // Linked morph target
+        if (this.linkBlendShapes){
+          if (mt[i].linked !== undefined)
+            mt[mt[i].linked].weight = (gl.mouse.x - rect.x)/(rect.w);
+        }
       }
       // Prev node name for multiple meshes with morph targets
       prevNode = node;
     }
     // Reset button
     //rect={x:w-startWminus,y:0.07*h + mt.length*hSq*1.25,w:150,h:hSq*0.75};
-    rect={x:w-startWminus,y:0.07*h + this.maxMorphPerNode*hSq*1.25,w:150,h:hSq*0.75};
+    rect={x:w-startWminus,y:0.07*h + this._maxMorphPerNode*hSq*1.25,w:150,h:hSq*0.75};
     gl.fillStyle = "rgba(255,255,255,0.9)";
  	  gl.fillText("RESET", rect.x + rect.w/2, rect.y +3*rect.h/4);
     gl.fillStyle = "rgba(255,255,255,0.3)";      
